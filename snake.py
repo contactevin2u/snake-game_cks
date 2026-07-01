@@ -13,8 +13,11 @@ Run it with:
     python snake.py
 """
 
+import os
 import random
+import sqlite3
 import tkinter as tk
+from tkinter import simpledialog
 
 # ---- Game configuration -------------------------------------------------
 CELL_SIZE = 20          # pixel size of one grid cell
@@ -33,6 +36,55 @@ TEXT_COLOR = "#cdd6f4"
 
 WIDTH = GRID_WIDTH * CELL_SIZE
 HEIGHT = GRID_HEIGHT * CELL_SIZE
+
+MAX_SCORES = 10  # how many entries the leaderboard keeps / shows
+
+# The database file lives next to this script so scores persist between runs.
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scores.db")
+
+
+# ---- Database (SQLite, built into Python) -------------------------------
+def init_db():
+    """Create the scores table on first run."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS scores ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name TEXT NOT NULL,"
+            "  score INTEGER NOT NULL,"
+            "  created_at TEXT DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        )
+
+
+def add_score(name, score):
+    """Save one result to the database."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO scores (name, score) VALUES (?, ?)", (name, score)
+        )
+
+
+def get_top_scores(limit=MAX_SCORES):
+    """Return the best scores as a list of (name, score), highest first."""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT name, score FROM scores "
+            "ORDER BY score DESC, created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return rows
+
+
+def qualifies_for_leaderboard(score):
+    """True if this score earns a spot in the top MAX_SCORES."""
+    if score <= 0:
+        return False
+    top = get_top_scores(MAX_SCORES)
+    if len(top) < MAX_SCORES:
+        return True
+    lowest = top[-1][1]
+    return score > lowest
 
 
 class SnakeGame:
@@ -66,6 +118,8 @@ class SnakeGame:
         self.speed = START_SPEED_MS
         self.paused = False
         self.game_over = False
+        self.score_recorded = False        # have we already handled game over?
+        self.top_scores = get_top_scores()  # cached leaderboard for the overlay
 
     def random_food(self):
         """Pick a random empty cell for the food."""
@@ -110,9 +164,28 @@ class SnakeGame:
     def tick(self):
         if not self.paused and not self.game_over:
             self.move()
+            if self.game_over and not self.score_recorded:
+                self.handle_game_over()
         self.render()
         # Schedule the next frame.
         self.root.after(self.speed, self.tick)
+
+    def handle_game_over(self):
+        """Ask for a name on a high score, save it, and refresh the ranking."""
+        self.score_recorded = True  # set first so this runs only once
+        self.render()  # show the final board behind the popup
+
+        if qualifies_for_leaderboard(self.score):
+            name = simpledialog.askstring(
+                "New High Score!",
+                f"Score: {self.score}\nEnter your name:",
+                parent=self.root,
+            )
+            if name and name.strip():
+                add_score(name.strip()[:20], self.score)
+
+        # Reload so the overlay shows the latest ranking.
+        self.top_scores = get_top_scores()
 
     def move(self):
         self.direction = self.next_direction
@@ -181,7 +254,7 @@ class SnakeGame:
         if self.game_over:
             won = self.food is None
             title = "YOU WIN!" if won else "GAME OVER"
-            self._center_text(title, f"Score: {self.score}   -   Press R to restart")
+            self._game_over_overlay(title)
 
     def _tagged_rect(self, cell, color):
         x, y = cell
@@ -201,8 +274,57 @@ class SnakeGame:
             font=("Consolas", 12), text=subtitle, tags="dynamic",
         )
 
+    def _game_over_overlay(self, title):
+        """Draw the game-over panel with the high-score ranking."""
+        # Dark panel so the text is readable over the board.
+        pad = 40
+        self.canvas.create_rectangle(
+            pad, 20, WIDTH - pad, HEIGHT - 20,
+            fill="#181825", outline=SNAKE_HEAD_COLOR, width=2, tags="dynamic",
+        )
+
+        self.canvas.create_text(
+            WIDTH // 2, 48, fill=TEXT_COLOR,
+            font=("Consolas", 22, "bold"), text=title, tags="dynamic",
+        )
+        self.canvas.create_text(
+            WIDTH // 2, 76, fill=FOOD_COLOR,
+            font=("Consolas", 13), text=f"Your score: {self.score}", tags="dynamic",
+        )
+
+        # Ranking header.
+        self.canvas.create_text(
+            WIDTH // 2, 104, fill=SNAKE_HEAD_COLOR,
+            font=("Consolas", 13, "bold"), text="TOP SCORES", tags="dynamic",
+        )
+
+        # Ranking rows: "1.  ALICE            123"
+        start_y = 128
+        row_h = 20
+        if not self.top_scores:
+            self.canvas.create_text(
+                WIDTH // 2, start_y + 10, fill=TEXT_COLOR,
+                font=("Consolas", 12), text="No scores yet - be the first!",
+                tags="dynamic",
+            )
+        else:
+            for i, (name, score) in enumerate(self.top_scores):
+                rank = f"{i + 1:>2}."
+                line = f"{rank}  {name[:14]:<14} {score:>5}"
+                self.canvas.create_text(
+                    WIDTH // 2, start_y + i * row_h, fill=TEXT_COLOR,
+                    font=("Consolas", 12), text=line, tags="dynamic",
+                )
+
+        self.canvas.create_text(
+            WIDTH // 2, HEIGHT - 36, fill=TEXT_COLOR,
+            font=("Consolas", 11), text="Press R to restart   -   Esc to quit",
+            tags="dynamic",
+        )
+
 
 def main():
+    init_db()
     root = tk.Tk()
     SnakeGame(root)
     root.mainloop()
