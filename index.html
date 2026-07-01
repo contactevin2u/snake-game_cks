@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NEON SNAKE</title>
+<style>
+  :root {
+    --bg0: #0a0a14;
+    --bg1: #14142a;
+    --text: #e6e9ff;
+    --dim: #8b8fb5;
+    --accent: #94e2d5;
+    --food: #f38ba8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: radial-gradient(ellipse at 50% 0%, #1a1a3a 0%, var(--bg0) 70%);
+    color: var(--text);
+    font-family: "Segoe UI", Consolas, system-ui, monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+    overflow-x: hidden;
+  }
+  .title {
+    font-weight: 800;
+    font-size: clamp(26px, 6vw, 42px);
+    letter-spacing: 6px;
+    margin: 0;
+    background: linear-gradient(90deg, #94e2d5, #a6e3a1, #f9e2af, #f38ba8, #cba6f7);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 14px rgba(148, 226, 213, 0.35));
+    animation: hue 8s linear infinite;
+  }
+  @keyframes hue { to { filter: drop-shadow(0 0 14px rgba(148,226,213,0.35)) hue-rotate(360deg); } }
+
+  .stage { position: relative; }
+  canvas {
+    display: block;
+    background: #0d0d1a;
+    border-radius: 14px;
+    box-shadow: 0 0 0 1px rgba(148,226,213,0.15), 0 20px 60px rgba(0,0,0,0.6),
+                0 0 60px rgba(148,226,213,0.08);
+    touch-action: none;
+    /* Scale up to fill the screen while keeping the 3:2 aspect ratio. */
+    width: min(94vw, 132vh);
+    aspect-ratio: 3 / 2;
+    height: auto;
+  }
+  /* In real fullscreen, go edge-to-edge and drop the rounded corners. */
+  body:fullscreen { justify-content: center; gap: 0; padding: 0; }
+  body:fullscreen .title { position: absolute; top: 10px; font-size: 26px; opacity: .85; }
+  body:fullscreen canvas { width: min(99vw, 148vh); border-radius: 0; }
+
+  /* Fullscreen toggle button (top-right). */
+  .fs-btn {
+    position: fixed;
+    top: 12px; right: 14px;
+    z-index: 50;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(20,20,40,0.7);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+  }
+  .fs-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- Top-center option bar (in-game touch controls) ---- */
+  .top-bar {
+    position: fixed;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: none;              /* shown only while a game is running */
+    gap: 6px;
+    padding: 5px;
+    border-radius: 14px;
+    background: rgba(20, 20, 40, 0.72);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  }
+  .tb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 13px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease, color .12s ease;
+  }
+  .tb-btn:hover { transform: translateY(-1px); border-color: var(--accent); color: var(--accent); background: rgba(148,226,213,0.12); }
+  .tb-btn:active { transform: translateY(0); }
+  .tb-ico { font-size: 15px; line-height: 1; }
+  /* Hide the game title while playing so the bar owns the top-center space. */
+  .playing .title { visibility: hidden; }
+
+  /* On phones: collapse buttons to icons so nothing overlaps. */
+  @media (max-width: 560px) {
+    .tb-txt, .fs-txt { display: none; }
+    .tb-btn { padding: 9px 11px; }
+    .fs-btn { padding: 8px 10px; }
+  }
+
+  /* ---- Menu overlay ---- */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 18px;
+    background: rgba(10, 10, 20, 0.82);
+    backdrop-filter: blur(3px);
+    border-radius: 14px;
+    text-align: center;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 {
+    margin: 0 0 2px;
+    font-size: clamp(16px, 4vw, 22px);
+    letter-spacing: 3px;
+    color: var(--accent);
+  }
+  .modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+    max-width: 500px;
+  }
+  .mode-card {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 12px 12px 11px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+    cursor: pointer;
+    text-align: left;
+    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+    color: var(--text);
+  }
+  .mode-card:hover { transform: translateY(-3px); }
+  .mode-card:focus-visible { outline: 2px solid var(--accent); }
+  .mode-card .mc-name { font-weight: 700; font-size: 15px; margin-bottom: 3px; }
+  .mode-card .mc-desc { font-size: 11.5px; color: var(--dim); line-height: 1.45; }
+  .mode-card[data-mode="zen"]:hover      { border-color:#a6e3a1; box-shadow:0 0 22px rgba(166,227,161,.25); }
+  .mode-card[data-mode="arcade"]:hover   { border-color:#89b4fa; box-shadow:0 0 22px rgba(137,180,250,.25); }
+  .mode-card[data-mode="time"]:hover     { border-color:#f9e2af; box-shadow:0 0 22px rgba(249,226,175,.25); }
+  .mode-card[data-mode="chaos"]:hover    { border-color:#cba6f7; box-shadow:0 0 22px rgba(203,166,247,.25); }
+  .mode-card.mode-wide { grid-column: 1 / -1; }
+  .mode-card[data-mode="classic"]:hover { border-color:#94e2d5; box-shadow:0 0 22px rgba(148,226,213,.28); }
+  .mc-tag { font-size:10px; letter-spacing:1px; text-transform:uppercase; opacity:.7; }
+  .mode-card[data-mode="duo"]:hover { border-color:#f5c2e7; box-shadow:0 0 22px rgba(245,194,231,.28); }
+  .mc-tag.classic{color:#94e2d5}.mc-tag.zen{color:#a6e3a1}.mc-tag.arcade{color:#89b4fa}.mc-tag.time{color:#f9e2af}.mc-tag.chaos{color:#cba6f7}.mc-tag.duo{color:#f5c2e7}.mc-tag.online{color:#74c7ec}
+  .mode-card[data-mode="online"]:hover { border-color:#74c7ec; box-shadow:0 0 22px rgba(116,199,236,.30); }
+
+  /* ---- Online lobby ---- */
+  .room-code {
+    font-family: Consolas, monospace;
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: 10px;
+    color: #74c7ec;
+    text-shadow: 0 0 18px rgba(116,199,236,0.5);
+    margin: 6px 0 4px;
+    padding-left: 10px; /* offset the letter-spacing so it looks centered */
+  }
+  .code-input {
+    width: 100%;
+    text-align: center;
+    text-transform: uppercase;
+    font-family: Consolas, monospace;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 8px;
+    padding: 12px 10px;
+    margin: 4px 0 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(116,199,236,0.5);
+    background: rgba(116,199,236,0.08);
+    color: var(--text);
+    outline: none;
+  }
+  .code-input:focus { border-color:#74c7ec; box-shadow:0 0 0 2px rgba(116,199,236,0.4); }
+
+  /* ---- Pause / call menu ---- */
+  .pause-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 300px;
+  }
+  .pause-panel h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: 4px; }
+  .menu-btn {
+    border: 1px solid rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.05);
+    color: var(--text);
+    padding: 13px 20px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease;
+  }
+  .menu-btn:hover { transform: translateY(-2px); }
+  .menu-btn.primary { border-color: var(--accent); color: var(--accent); background: rgba(148,226,213,0.12); }
+  .menu-btn.primary:hover { background: rgba(148,226,213,0.22); }
+  .menu-btn.danger:hover { border-color:#f38ba8; color:#f38ba8; background: rgba(243,139,168,0.12); }
+
+  /* ---- Keyboard focus highlight (works without a mouse) ---- */
+  .mode-card.kb-focus, .menu-btn.kb-focus, .lb-open-btn.kb-focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--accent), 0 0 24px rgba(148,226,213,0.4) !important;
+    transform: translateY(-2px);
+  }
+  .mode-card:focus, .menu-btn:focus { outline: none; }
+  .menu-nav-hint { font-size: 12px; color: var(--dim); margin-top: 4px; }
+
+  /* ---- All-modes leaderboard ---- */
+  .lb-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 2px;
+  }
+  .lb-card {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.03);
+    text-align: left;
+  }
+  .lb-card h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    letter-spacing: 1px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .lb-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-family: Consolas, monospace;
+    padding: 1px 0;
+    color: var(--text);
+  }
+  .lb-row .r { color: var(--dim); width: 20px; }
+  .lb-row .n { flex: 1; margin: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-row .s { font-weight: 700; }
+  .lb-empty { font-size: 11.5px; color: var(--dim); font-style: italic; }
+
+  .hint { font-size: 12.5px; color: var(--dim); text-align: center; line-height: 1.7; }
+  kbd {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 5px;
+    padding: 1px 7px;
+    font-size: 11.5px;
+    color: var(--text);
+  }
+  .btn {
+    margin-top: 4px;
+    border: 1px solid var(--accent);
+    background: rgba(148,226,213,0.12);
+    color: var(--accent);
+    padding: 9px 22px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: background .12s ease, transform .12s ease;
+  }
+  .btn:hover { background: rgba(148,226,213,0.22); transform: translateY(-1px); }
+</style>
+</head>
+<body>
+  <button class="fs-btn" id="fsBtn" title="Toggle fullscreen (F)">⛶ <span class="fs-txt">Fullscreen</span></button>
+  <h1 class="title">NEON SNAKE</h1>
+
+  <!-- Top-center option bar (touch-friendly in-game controls). -->
+  <div class="top-bar" id="topBar">
+    <button class="tb-btn" id="tbPause" title="Pause (Space)"><span class="tb-ico">⏸</span><span class="tb-txt">Pause</span></button>
+    <button class="tb-btn" id="tbRestart" title="Restart (R)"><span class="tb-ico">🔄</span><span class="tb-txt">Restart</span></button>
+    <button class="tb-btn" id="tbMenu" title="Main menu (Esc)"><span class="tb-ico">☰</span><span class="tb-txt">Menu</span></button>
+  </div>
+
+  <div class="stage">
+    <canvas id="board" width="600" height="400"></canvas>
+
+    <!-- Mode-select menu -->
+    <div class="overlay" id="menu">
+      <h2>CHOOSE YOUR MODE</h2>
+      <div class="modes">
+        <button class="mode-card mode-wide" data-mode="classic">
+          <div class="mc-tag classic">Normal Match</div>
+          <div class="mc-name">🐍 Classic</div>
+          <div class="mc-desc">The original snake. Solid walls, don't hit yourself. Pure &amp; simple.</div>
+        </button>
+        <button class="mode-card" data-mode="zen">
+          <div class="mc-tag zen">Relax</div>
+          <div class="mc-name">🌿 Zen / No-Die</div>
+          <div class="mc-desc">Walls wrap around. Hitting your tail just trims you — no death, no pressure.</div>
+        </button>
+        <button class="mode-card" data-mode="arcade">
+          <div class="mc-tag arcade">Progress</div>
+          <div class="mc-name">🎯 Arcade</div>
+          <div class="mc-desc">Levels with obstacles &amp; portals. Hit the target score to advance.</div>
+        </button>
+        <button class="mode-card" data-mode="time">
+          <div class="mc-tag time">Rush</div>
+          <div class="mc-name">⏱️ Speed Freak</div>
+          <div class="mc-desc">Beat the clock. Every fruit adds seconds — route aggressively.</div>
+        </button>
+        <button class="mode-card" data-mode="chaos">
+          <div class="mc-tag chaos">Wild</div>
+          <div class="mc-name">🌀 Chaos / Quantum</div>
+          <div class="mc-desc">Inverted controls, glitches, screen shake &amp; random portals. Pure madness.</div>
+        </button>
+        <button class="mode-card" data-mode="duo">
+          <div class="mc-tag duo">2 Players</div>
+          <div class="mc-name">👥 Duo — Same Device</div>
+          <div class="mc-desc">Two snakes, one keyboard. P1 = Arrows 🟢 · P2 = WASD 🔵. Last one alive wins!</div>
+        </button>
+        <button class="mode-card" data-mode="online">
+          <div class="mc-tag online">Online</div>
+          <div class="mc-name">🌐 Online Duo</div>
+          <div class="mc-desc">Play from two phones/PCs. One hosts a room, the other joins with the code. Swipe or arrows.</div>
+        </button>
+      </div>
+      <button class="menu-btn lb-open-btn" id="btnLeaderboard">🏆  Leaderboards</button>
+      <div class="hint">
+        <b style="color:var(--accent)">↑ ↓ select · <kbd>Enter</kbd> start</b><br>
+        In game: <kbd>Arrows</kbd>/<kbd>WASD</kbd> move · <kbd>Space</kbd> pause · <kbd>R</kbd> restart · <kbd>Esc</kbd> menu · swipe on touch
+      </div>
+    </div>
+
+    <!-- All-modes leaderboard -->
+    <div class="overlay hidden" id="leaderboard">
+      <h2>🏆 LEADERBOARDS</h2>
+      <div class="lb-grid" id="lbGrid"></div>
+      <button class="menu-btn primary" id="btnLbBack">←  Back to Menu</button>
+    </div>
+
+    <!-- Online lobby (host / join a room) -->
+    <div class="overlay hidden" id="onlineLobby">
+      <div class="pause-panel" style="max-width:340px;">
+        <h2 style="color:#74c7ec;">🌐 ONLINE DUO</h2>
+
+        <div id="olChoose">
+          <button class="menu-btn primary" id="btnHost">📡  Create Room</button>
+          <button class="menu-btn" id="btnShowJoin">🔑  Join a Room</button>
+          <button class="menu-btn" id="btnOnlineBack">←  Back</button>
+        </div>
+
+        <div id="olHost" class="hidden">
+          <div class="hint">Share this code with your friend:</div>
+          <div class="room-code" id="roomCode">····</div>
+          <div class="hint" id="hostStatus">Starting…</div>
+          <button class="menu-btn" id="btnHostCancel">←  Cancel</button>
+        </div>
+
+        <div id="olJoin" class="hidden">
+          <div class="hint">Enter your friend's room code:</div>
+          <input id="joinInput" class="code-input" maxlength="4" placeholder="CODE"
+                 autocomplete="off" autocapitalize="characters" spellcheck="false" />
+          <button class="menu-btn primary" id="btnJoinGo">Connect</button>
+          <div class="hint" id="joinStatus"></div>
+          <button class="menu-btn" id="btnJoinCancel">←  Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-game pause / call menu (opened with Esc) -->
+    <div class="overlay hidden" id="pauseMenu">
+      <div class="pause-panel">
+        <h2>PAUSED</h2>
+        <button class="menu-btn primary" id="btnResume">▶  Resume</button>
+        <button class="menu-btn" id="btnRestart">🔄  Restart</button>
+        <button class="menu-btn" id="btnMainMenu">☰  Exit to Main Menu</button>
+        <button class="menu-btn danger" id="btnExit">✕  Exit Game</button>
+        <div class="menu-nav-hint">↑ ↓ select · <kbd>Enter</kbd> confirm · <kbd>Esc</kbd> resume</div>
+      </div>
+    </div>
+
+    <!-- Goodbye screen -->
+    <div class="overlay hidden" id="byeScreen">
+      <div class="pause-panel" style="text-align:center;">
+        <h2 style="color:var(--accent);">👋 THANKS FOR PLAYING</h2>
+        <div class="hint">You can close this tab now.</div>
+        <button class="menu-btn primary" id="btnBackFromBye">Back to Menu</button>
+      </div>
+    </div>
+  </div>
+
+<!-- PeerJS: WebRTC peer-to-peer for cross-device online play (needs internet). -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+/* =========================================================================
+   NEON SNAKE  —  four modes, neon graphics, particles, screen shake.
+   Ports & extends the original snake.py. Leaderboard in localStorage.
+   ========================================================================= */
+
+// ---- Grid / timing config ----------------------------------------------
+const CELL = 20;
+const GW = 30, GH = 20;
+const WIDTH = GW * CELL, HEIGHT = GH * CELL;
+const START_SPEED = 120, MIN_SPEED = 60, SPEED_STEP = 4;
+const MAX_SCORES = 10;
+
+// ---- Palette ------------------------------------------------------------
+const COL = {
+  bg: "#0d0d1a",
+  grid: "rgba(148,226,213,0.05)",
+  snake: "#a6e3a1",
+  head: "#94e2d5",
+  food: "#f38ba8",
+  text: "#e6e9ff",
+  dim: "#8b8fb5",
+  obstacle: "#585b8f",
+  portalA: "#89b4fa",
+  portalB: "#f9e2af",
+};
+
+// ---- Mode definitions ---------------------------------------------------
+const MODES = {
+  classic:{ name: "Classic",     accent: "#94e2d5", wrap: false, selfShrink: false, obstacles: false, portals: false, timer: false, chaos: false },
+  duo:    { name: "Duo (2P)",    accent: "#f5c2e7", wrap: false, selfShrink: false, obstacles: false, portals: false, timer: false, chaos: false, duo: true, local: true },
+  online: { name: "Online Duo",  accent: "#74c7ec", wrap: false, selfShrink: false, obstacles: false, portals: false, timer: false, chaos: false, duo: true, local: true, online: true },
+  zen:    { name: "Zen",         accent: "#a6e3a1", wrap: true,  selfShrink: true,  obstacles: false, portals: false, timer: false, chaos: false },
+  arcade: { name: "Arcade",      accent: "#89b4fa", wrap: false, selfShrink: false, obstacles: true,  portals: true,  timer: false, chaos: false },
+  time:   { name: "Speed Freak", accent: "#f9e2af", wrap: false, selfShrink: false, obstacles: false, portals: false, timer: true,  chaos: false },
+  chaos:  { name: "Chaos",       accent: "#cba6f7", wrap: true,  selfShrink: false, obstacles: true,  portals: true,  timer: false, chaos: true },
+};
+
+// Time-attack tuning.
+const TIME_START = 30, TIME_PER_FOOD = 3;
+
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const menuEl = document.getElementById("menu");
+const pauseMenuEl = document.getElementById("pauseMenu");
+const byeScreenEl = document.getElementById("byeScreen");
+const leaderboardEl = document.getElementById("leaderboard");
+const lbGridEl = document.getElementById("lbGrid");
+const onlineLobbyEl = document.getElementById("onlineLobby");
+const roomCodeEl = document.getElementById("roomCode");
+const hostStatusEl = document.getElementById("hostStatus");
+const joinInputEl = document.getElementById("joinInput");
+const joinStatusEl = document.getElementById("joinStatus");
+let pauseMenuOpen = false;
+
+// ---- Online (WebRTC via PeerJS) state -----------------------------------
+// role: "host" runs the authoritative simulation and streams state to the
+// "guest", who only renders and sends back its input.
+let online = { active: false, role: null, peer: null, conn: null, connected: false };
+const PEER_PREFIX = "neonsnake2p-";   // namespace so room codes don't collide with other apps
+
+// ---- Top-center option bar ----------------------------------------------
+const topBarEl = document.getElementById("topBar");
+const tbPauseBtn = document.getElementById("tbPause");
+
+// ---- Supersampling: render at 2x for crisp visuals when scaled up -------
+const SS = 2;
+canvas.width = WIDTH * SS;
+canvas.height = HEIGHT * SS;
+// Reset the drawing transform to logical (600x400) coords, scaled by SS.
+function beginFrame() { ctx.setTransform(SS, 0, 0, SS, 0, 0); }
+
+// ---- Fullscreen ---------------------------------------------------------
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+}
+document.getElementById("fsBtn").addEventListener("click", toggleFullscreen);
+
+// ---- Leaderboard (localStorage, per mode) -------------------------------
+const keyFor = (m) => "neon_snake_scores_" + m;
+function loadScores(m) {
+  try { const a = JSON.parse(localStorage.getItem(keyFor(m)) || "[]"); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+function topScores(m, limit = MAX_SCORES) {
+  const l = loadScores(m);
+  l.sort((a, b) => b.score - a.score || a.created - b.created);
+  return l.slice(0, limit);
+}
+function addScore(m, name, score) {
+  const l = loadScores(m);
+  l.push({ name: name.slice(0, 14), score, created: Date.now() });
+  l.sort((a, b) => b.score - a.score || a.created - b.created);
+  try { localStorage.setItem(keyFor(m), JSON.stringify(l.slice(0, MAX_SCORES))); } catch {}
+}
+function qualifies(m, score) {
+  if (score <= 0) return false;
+  const t = topScores(m);
+  return t.length < MAX_SCORES || score > t[t.length - 1].score;
+}
+
+// ---- Game state ---------------------------------------------------------
+let mode, cfg, running = false;
+let snake, dir, nextDir, food, score, speed, paused, gameOver, recorded, board;
+let level, target, obstacles, portals;
+let timeLeft;                       // seconds (time-attack)
+let particles, shake, glitch;       // fx
+let invertUntil, nextInvertAt;      // chaos control inversion
+let flashText;                      // transient banner ("LEVEL 2!", "INVERTED!")
+let flashUntil;
+let moveAcc = 0, lastT = 0;
+let players, foods, duoOver, duoResult;   // local 2-player state
+let countdown = 0;                        // ms remaining before a duo match begins
+
+const key = (x, y) => x + "," + y;
+
+function startGame(m) {
+  mode = m;
+  cfg = MODES[m];
+  document.documentElement.style.setProperty("--accent", cfg.accent);
+  menuEl.classList.add("hidden");
+  pauseMenuEl.classList.add("hidden");
+  byeScreenEl.classList.add("hidden");
+  leaderboardEl.classList.add("hidden");
+  clearAllHighlights();
+  pauseMenuOpen = false;
+  running = true;
+  level = 1;
+  reset(true);
+  lastT = performance.now();
+}
+
+function reset(fullRestart) {
+  const mx = Math.floor(GW / 2), my = Math.floor(GH / 2);
+  snake = [[mx, my], [mx - 1, my], [mx - 2, my]];
+  dir = [1, 0]; nextDir = [1, 0];
+  score = fullRestart ? 0 : score;
+  speed = START_SPEED;
+  paused = false; gameOver = false; recorded = false;
+  particles = []; shake = 0; glitch = 0;
+  invertUntil = 0; nextInvertAt = performance.now() + 6000;
+  flashText = null; flashUntil = 0;
+  if (cfg.timer) timeLeft = TIME_START;
+  buildLevel();
+  food = randomFood();
+  board = topScores(mode);
+  if (cfg.duo) initDuo();
+}
+
+// ---- Local 2-player -----------------------------------------------------
+function initDuo() {
+  const my = Math.floor(GH / 2);
+  players = [
+    { snake: [[8, my], [7, my], [6, my]],       dir: [1, 0],  nextDir: [1, 0],
+      score: 0, alive: true, body: COL.snake,  head: COL.head,  name: "P1" },
+    { snake: [[GW-9, my], [GW-8, my], [GW-7, my]], dir: [-1, 0], nextDir: [-1, 0],
+      score: 0, alive: true, body: "#89b4fa",  head: "#b4befe", name: "P2" },
+  ];
+  foods = [];
+  spawnDuoFood(); spawnDuoFood();
+  duoOver = false; duoResult = null;
+  speed = 110;        // steady pace for fairness
+  countdown = 3000;   // "3… 2… 1… GO!" before the match starts
+}
+function duoOccupied(x, y) {
+  for (const p of players) for (const c of p.snake) if (c[0] === x && c[1] === y) return true;
+  for (const f of foods) if (f[0] === x && f[1] === y) return true;
+  return false;
+}
+function spawnDuoFood() {
+  for (let t = 0; t < 300; t++) {
+    const x = (Math.random() * GW) | 0, y = (Math.random() * GH) | 0;
+    if (!duoOccupied(x, y)) { foods.push([x, y]); return; }
+  }
+}
+function setDuoDir(i, nd) {
+  const p = players[i];
+  if (!p || !p.alive) return;
+  const [cdx, cdy] = p.dir;
+  if (nd[0] !== -cdx || nd[1] !== -cdy) p.nextDir = nd;
+}
+function stepDuo() {
+  if (duoOver) return;
+
+  // Compute each live player's intended new head.
+  const heads = players.map(p => {
+    if (!p.alive) return null;
+    p.dir = p.nextDir;
+    return [p.snake[0][0] + p.dir[0], p.snake[0][1] + p.dir[1]];
+  });
+
+  const willDie = [false, false];
+  players.forEach((p, i) => {
+    if (!p.alive) return;
+    const h = heads[i];
+    // Wall.
+    if (h[0] < 0 || h[0] >= GW || h[1] < 0 || h[1] >= GH) { willDie[i] = true; return; }
+    // Growing? (then tail stays, so own tail counts as solid)
+    const grows = foods.some(f => f[0] === h[0] && f[1] === h[1]);
+    const own = grows ? p.snake : p.snake.slice(0, p.snake.length - 1);
+    if (own.some(c => c[0] === h[0] && c[1] === h[1])) { willDie[i] = true; return; }
+    // Other snake's body (treated as solid).
+    players.forEach((q, j) => {
+      if (j !== i && q.alive && q.snake.some(c => c[0] === h[0] && c[1] === h[1])) willDie[i] = true;
+    });
+  });
+  // Head-on: both aim for the same cell → both crash.
+  if (players[0].alive && players[1].alive &&
+      heads[0][0] === heads[1][0] && heads[0][1] === heads[1][1]) {
+    willDie[0] = willDie[1] = true;
+  }
+
+  // Apply.
+  players.forEach((p, i) => {
+    if (!p.alive) return;
+    if (willDie[i]) {
+      p.alive = false;
+      spawnParticles(p.snake[0][0], p.snake[0][1], p.head, 22);
+      shake = Math.max(shake, 8);
+      return;
+    }
+    const h = heads[i];
+    p.snake.unshift(h);
+    const fi = foods.findIndex(f => f[0] === h[0] && f[1] === h[1]);
+    if (fi !== -1) {
+      p.score++;
+      spawnParticles(h[0], h[1], COL.food, 14);
+      shake = Math.max(shake, 3);
+      foods.splice(fi, 1); spawnDuoFood();
+    } else {
+      p.snake.pop();
+    }
+  });
+
+  if (players.filter(p => p.alive).length <= 1) endDuo();
+}
+function endDuo() {
+  duoOver = true;
+  const [a, b] = players;
+  if (a.alive && !b.alive) duoResult = "🟢 PLAYER 1 WINS!";
+  else if (b.alive && !a.alive) duoResult = "🔵 PLAYER 2 WINS!";
+  else if (a.score > b.score) duoResult = "🟢 PLAYER 1 WINS!";
+  else if (b.score > a.score) duoResult = "🔵 PLAYER 2 WINS!";
+  else duoResult = "🤝 DRAW!";
+  shake = Math.max(shake, 12);
+}
+
+// ---- Level / obstacle / portal generation -------------------------------
+function buildLevel() {
+  obstacles = new Set();
+  portals = [];
+  if (cfg.obstacles) {
+    const count = cfg.chaos ? 10 : 4 + level * 3;
+    let tries = 0;
+    while (obstacles.size < count && tries < 500) {
+      tries++;
+      const x = 2 + Math.floor(Math.random() * (GW - 4));
+      const y = 2 + Math.floor(Math.random() * (GH - 4));
+      // Keep the spawn row clear so you don't start trapped.
+      if (Math.abs(y - Math.floor(GH / 2)) <= 1) continue;
+      obstacles.add(key(x, y));
+    }
+  }
+  if (cfg.portals) {
+    const pairs = cfg.chaos ? 2 : 1;
+    for (let p = 0; p < pairs; p++) {
+      const a = freeCell(), b = freeCell();
+      if (a && b) portals.push([a, b]);
+    }
+  }
+  if (!cfg.obstacles) { /* time / zen: open field */ }
+  // Advance target for arcade progression.
+  target = 5 + (level - 1) * 5;
+}
+
+function occupiedByThings(x, y) {
+  if (obstacles && obstacles.has(key(x, y))) return true;
+  return false;
+}
+function freeCell() {
+  const snakeSet = new Set((snake || []).map(c => key(c[0], c[1])));
+  for (let t = 0; t < 200; t++) {
+    const x = Math.floor(Math.random() * GW), y = Math.floor(Math.random() * GH);
+    if (snakeSet.has(key(x, y))) continue;
+    if (occupiedByThings(x, y)) continue;
+    return [x, y];
+  }
+  return null;
+}
+function randomFood() {
+  const snakeSet = new Set(snake.map(c => key(c[0], c[1])));
+  const empty = [];
+  for (let x = 0; x < GW; x++) for (let y = 0; y < GH; y++) {
+    const k = key(x, y);
+    if (snakeSet.has(k) || occupiedByThings(x, y)) continue;
+    empty.push([x, y]);
+  }
+  return empty.length ? empty[(Math.random() * empty.length) | 0] : null;
+}
+
+// ---- Input --------------------------------------------------------------
+const DIRS = {
+  arrowup: [0,-1], w:[0,-1], arrowdown:[0,1], s:[0,1],
+  arrowleft:[-1,0], a:[-1,0], arrowright:[1,0], d:[1,0],
+};
+function setDir(nd) {
+  // Apply chaos inversion.
+  if (performance.now() < invertUntil) nd = [-nd[0], -nd[1]];
+  const [cdx, cdy] = dir;
+  if (nd[0] !== -cdx || nd[1] !== -cdy) nextDir = nd;
+}
+// ---- Keyboard menu navigation (fully mouse-free) -----------------------
+let menuIndex = 0;
+function activeMenuList() {
+  if (!menuEl.classList.contains("hidden"))
+    return [...menuEl.querySelectorAll(".mode-card, .lb-open-btn")];
+  if (!leaderboardEl.classList.contains("hidden"))
+    return [...leaderboardEl.querySelectorAll(".menu-btn")];
+  if (!pauseMenuEl.classList.contains("hidden"))
+    return [...pauseMenuEl.querySelectorAll(".menu-btn")];
+  if (!byeScreenEl.classList.contains("hidden"))
+    return [...byeScreenEl.querySelectorAll(".menu-btn")];
+  return null;
+}
+function clearAllHighlights() {
+  document.querySelectorAll(".kb-focus").forEach(el => el.classList.remove("kb-focus"));
+}
+function highlightMenu() {
+  clearAllHighlights();                 // never leave a stale green box behind
+  const list = activeMenuList();
+  if (!list || !list.length) return;
+  menuIndex = ((menuIndex % list.length) + list.length) % list.length;
+  list[menuIndex].classList.add("kb-focus");
+  try { list[menuIndex].focus({ preventScroll: true }); } catch {}
+}
+function focusMenu() { menuIndex = 0; highlightMenu(); }
+function moveMenu(d) { menuIndex += d; highlightMenu(); }
+function activateMenu() {
+  const list = activeMenuList();
+  if (list && list[menuIndex]) list[menuIndex].click();
+}
+
+const P1_KEYS = { arrowup:[0,-1], arrowdown:[0,1], arrowleft:[-1,0], arrowright:[1,0] };
+const P2_KEYS = { w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] };
+
+document.addEventListener("keydown", (e) => {
+  // Don't hijack typing in the room-code field.
+  if (e.target && e.target.tagName === "INPUT") return;
+
+  const k = e.key.toLowerCase();
+
+  // Fullscreen toggle works anywhere.
+  if (k === "f") { e.preventDefault(); toggleFullscreen(); return; }
+
+  // --- Online lobby: Esc backs out; other keys are handled by its buttons. ---
+  if (!onlineLobbyEl.classList.contains("hidden")) {
+    if (k === "escape") { e.preventDefault(); closeOnlineLobby(); }
+    return;
+  }
+
+  // --- If any menu overlay is open, keys drive the menu, not the snake. ---
+  if (activeMenuList()) {
+    if (k === "arrowup" || k === "w" || k === "arrowleft" || k === "a") { e.preventDefault(); moveMenu(-1); return; }
+    if (k === "arrowdown" || k === "s" || k === "arrowright" || k === "d") { e.preventDefault(); moveMenu(1); return; }
+    if (k === "enter" || k === " ") { e.preventDefault(); activateMenu(); return; }
+    if (k === "escape") {
+      e.preventDefault();
+      if (pauseMenuOpen) resumeGame();          // Esc closes the pause menu
+      else if (!leaderboardEl.classList.contains("hidden")) closeLeaderboard(); // Esc leaves leaderboard
+      else if (!byeScreenEl.classList.contains("hidden")) toMenu();  // Esc leaves goodbye screen
+      // On the main menu, Esc does nothing (nowhere to go back to).
+      return;
+    }
+    return; // swallow everything else while a menu is open
+  }
+
+  // --- In-game controls. ---
+  if (k === "escape") {
+    e.preventDefault();
+    if (cfg && cfg.online) leaveOnline();   // no shared pause online — just leave
+    else openPauseMenu();
+    return;
+  }
+  if (!running) return;
+
+  // Online duo: one player per device, use any of arrows/WASD/swipe.
+  if (cfg.online) {
+    if (duoOver) {
+      if (k === "r" || k === "enter") {
+        e.preventDefault();
+        if (online.role === "host") reset(true);
+        else if (online.conn) { try { online.conn.send({ type: "restart" }); } catch {} }
+      }
+      return;
+    }
+    if (k in DIRS) {
+      e.preventDefault();
+      const nd = DIRS[k];
+      if (online.role === "host") setDuoDir(0, nd);
+      else if (online.conn) { try { online.conn.send({ type: "dir", dir: nd }); } catch {} }
+    }
+    return;
+  }
+
+  // Duo (local 2-player): split controls, own game-over handling.
+  if (cfg.duo) {
+    if (duoOver) { if (k === "r" || k === "enter") { e.preventDefault(); reset(true); } return; }
+    if (k === "r") { reset(true); return; }
+    if (k === " " || k === "p") { paused = !paused; e.preventDefault(); return; }
+    if (k in P1_KEYS) { e.preventDefault(); setDuoDir(0, P1_KEYS[k]); return; }
+    if (k in P2_KEYS) { e.preventDefault(); setDuoDir(1, P2_KEYS[k]); return; }
+    return;
+  }
+
+  if (gameOver) {
+    if (k === "r" || k === "enter") { e.preventDefault(); reset(true); }
+    return;
+  }
+  if (k === "r") { reset(true); return; }
+  if (k === " " || k === "p") { paused = !paused; e.preventDefault(); return; }
+  if (k in DIRS) { e.preventDefault(); setDir(DIRS[k]); }
+});
+
+// ---- Pause / call menu -------------------------------------------------
+function openPauseMenu() {
+  pauseMenuOpen = true;
+  paused = true;
+  pauseMenuEl.classList.remove("hidden");
+  focusMenu();
+}
+function resumeGame() {
+  pauseMenuOpen = false;
+  paused = false;
+  pauseMenuEl.classList.add("hidden");
+  clearAllHighlights();        // remove the green highlight box on resume
+  lastT = performance.now();   // avoid a time jump after being paused
+}
+function restartGame() {
+  pauseMenuOpen = false;
+  pauseMenuEl.classList.add("hidden");
+  clearAllHighlights();
+  level = 1;
+  reset(true);                 // fresh game of the current mode (duo re-runs its countdown)
+  lastT = performance.now();
+}
+function toMenu() {
+  if (online.active) teardownOnline();
+  running = false;
+  pauseMenuOpen = false;
+  paused = false;
+  pauseMenuEl.classList.add("hidden");
+  onlineLobbyEl.classList.add("hidden");
+  byeScreenEl.classList.add("hidden");
+  menuEl.classList.remove("hidden");
+  focusMenu();
+}
+function exitGame() {
+  if (online.active) teardownOnline();
+  running = false;
+  pauseMenuOpen = false;
+  pauseMenuEl.classList.add("hidden");
+  menuEl.classList.add("hidden");
+  byeScreenEl.classList.remove("hidden");
+  focusMenu();
+  window.close();  // works if the tab was opened by a script; otherwise shows the goodbye screen
+}
+// ---- All-modes leaderboard ---------------------------------------------
+function openLeaderboard() {
+  renderLeaderboard();
+  menuEl.classList.add("hidden");
+  leaderboardEl.classList.remove("hidden");
+  focusMenu();
+}
+function closeLeaderboard() {
+  leaderboardEl.classList.add("hidden");
+  menuEl.classList.remove("hidden");
+  focusMenu();
+}
+function renderLeaderboard() {
+  lbGridEl.innerHTML = Object.keys(MODES).filter(m => !MODES[m].local).map(m => {
+    const rows = topScores(m);
+    const body = rows.length
+      ? rows.map((e, i) =>
+          `<div class="lb-row"><span class="r">${i + 1}.</span>` +
+          `<span class="n">${escapeHtml(e.name || "???")}</span>` +
+          `<span class="s">${e.score}</span></div>`).join("")
+      : `<div class="lb-empty">No scores yet</div>`;
+    return `<div class="lb-card">
+      <h3 style="color:${MODES[m].accent}">${MODES[m].name}</h3>${body}
+    </div>`;
+  }).join("");
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* =========================================================================
+   ONLINE DUO  —  cross-device 2-player over WebRTC (PeerJS).
+   The host runs the game and streams the full state each frame; the guest
+   renders that state and streams back its direction inputs. Simple and
+   desync-proof because there is a single authority.
+   ========================================================================= */
+function showOnlinePanel(id) {
+  ["olChoose", "olHost", "olJoin"].forEach(p =>
+    document.getElementById(p).classList.toggle("hidden", p !== id));
+}
+function openOnlineLobby() {
+  menuEl.classList.add("hidden");
+  onlineLobbyEl.classList.remove("hidden");
+  showOnlinePanel("olChoose");
+  clearAllHighlights();
+}
+function closeOnlineLobby() {
+  teardownOnline();
+  onlineLobbyEl.classList.add("hidden");
+  menuEl.classList.remove("hidden");
+  showOnlinePanel("olChoose");
+  focusMenu();
+}
+function makeCode() {
+  // 4 chars, no ambiguous 0/O/1/I so codes are easy to read out loud.
+  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 4; i++) s += abc[(Math.random() * abc.length) | 0];
+  return s;
+}
+function peerUnavailable(statusEl) {
+  if (typeof Peer === "undefined") {
+    statusEl.textContent = "⚠ Network library didn't load — check your internet.";
+    return true;
+  }
+  return false;
+}
+
+function hostRoom() {
+  showOnlinePanel("olHost");
+  if (peerUnavailable(hostStatusEl)) return;
+  teardownOnline();
+  const code = makeCode();
+  roomCodeEl.textContent = code;
+  hostStatusEl.textContent = "Connecting to server…";
+  online = { active: true, role: "host", peer: null, conn: null, connected: false };
+  const peer = new Peer(PEER_PREFIX + code);
+  online.peer = peer;
+  peer.on("open", () => { hostStatusEl.textContent = "Waiting for a player to join…"; });
+  peer.on("error", (err) => {
+    hostStatusEl.textContent = (err && err.type === "unavailable-id")
+      ? "That code is taken — cancel and try again."
+      : "Connection error — cancel and retry.";
+  });
+  peer.on("connection", (conn) => {
+    if (online.connected) { try { conn.close(); } catch {} return; }  // room is full
+    online.conn = conn;
+    conn.on("data", onHostData);
+    conn.on("close", onPeerClose);
+    conn.on("open", () => {
+      online.connected = true;
+      hostStatusEl.textContent = "Player joined!";
+      startOnlineGame("host");
+    });
+  });
+}
+
+function joinRoom() {
+  if (peerUnavailable(joinStatusEl)) return;
+  const code = (joinInputEl.value || "").trim().toUpperCase();
+  if (code.length < 4) { joinStatusEl.textContent = "Enter the 4-character code."; return; }
+  teardownOnline();
+  joinStatusEl.textContent = "Connecting to server…";
+  online = { active: true, role: "guest", peer: null, conn: null, connected: false };
+  const peer = new Peer();
+  online.peer = peer;
+  peer.on("open", () => {
+    joinStatusEl.textContent = "Joining room…";
+    const conn = peer.connect(PEER_PREFIX + code);
+    online.conn = conn;
+    conn.on("data", onGuestData);
+    conn.on("close", onPeerClose);
+    conn.on("error", () => { joinStatusEl.textContent = "Couldn't connect — check the code."; });
+    conn.on("open", () => {
+      online.connected = true;
+      startOnlineGame("guest");
+    });
+    // If the host id doesn't exist, PeerJS fires a peer-level error instead.
+    setTimeout(() => {
+      if (online.active && !online.connected)
+        joinStatusEl.textContent = "No response — check the code and try again.";
+    }, 8000);
+  });
+  peer.on("error", (err) => {
+    joinStatusEl.textContent = (err && err.type === "peer-unavailable")
+      ? "No room with that code."
+      : "Connection error — try again.";
+  });
+}
+
+// Guest's world is rebuilt from host messages; seed the color template here.
+function initGuestState() {
+  const my = Math.floor(GH / 2);
+  players = [
+    { snake: [[8, my]],      dir: [1, 0],  score: 0, alive: true, body: COL.snake, head: COL.head,  name: "P1" },
+    { snake: [[GW-9, my]],   dir: [-1, 0], score: 0, alive: true, body: "#89b4fa", head: "#b4befe", name: "P2" },
+  ];
+  foods = []; duoOver = false; duoResult = null; countdown = 3000; paused = false;
+  particles = []; shake = 0; glitch = 0;
+}
+function startOnlineGame(role) {
+  mode = "online";
+  cfg = MODES.online;
+  document.documentElement.style.setProperty("--accent", cfg.accent);
+  menuEl.classList.add("hidden");
+  onlineLobbyEl.classList.add("hidden");
+  pauseMenuEl.classList.add("hidden");
+  byeScreenEl.classList.add("hidden");
+  leaderboardEl.classList.add("hidden");
+  clearAllHighlights();
+  pauseMenuOpen = false;
+  running = true;
+  level = 1;
+  if (role === "host") reset(true);   // authoritative — sets up snakes, food, countdown
+  else initGuestState();
+  lastT = performance.now();
+}
+
+// Host receives the guest's input (and restart requests).
+function onHostData(msg) {
+  if (!msg) return;
+  if (msg.type === "dir") setDuoDir(1, msg.dir);
+  else if (msg.type === "restart" && duoOver) reset(true);
+}
+// Guest receives authoritative state snapshots.
+function onGuestData(msg) {
+  if (!msg || msg.type !== "state" || !players) return;
+  const s = msg;
+  for (let i = 0; i < 2; i++) {
+    players[i].snake = s.p[i].snake;
+    players[i].score = s.p[i].score;
+    players[i].alive = s.p[i].alive;
+    players[i].dir   = s.p[i].dir;
+  }
+  foods = s.foods;
+  countdown = s.countdown;
+  duoOver = s.duoOver;
+  duoResult = s.duoResult;
+  paused = s.paused;
+  if (s.shake > shake) shake = s.shake;
+}
+// Host: push the current state to the guest (called each frame).
+function sendState() {
+  if (!(online.active && online.role === "host" && online.connected && online.conn)) return;
+  try {
+    online.conn.send({
+      type: "state",
+      p: players.map(p => ({ snake: p.snake, score: p.score, alive: p.alive, dir: p.dir })),
+      foods, countdown: Math.max(0, countdown | 0),
+      duoOver, duoResult, paused, shake,
+    });
+  } catch {}
+}
+function onPeerClose() {
+  if (!online.active) return;
+  online.connected = false;
+  if (running && !duoOver) {          // opponent bailed mid-match
+    duoOver = true;
+    duoResult = "⚠ OPPONENT DISCONNECTED";
+    shake = Math.max(shake, 8);
+  }
+}
+function teardownOnline() {
+  try { online.conn && online.conn.close(); } catch {}
+  try { online.peer && online.peer.destroy(); } catch {}
+  online = { active: false, role: null, peer: null, conn: null, connected: false };
+}
+function leaveOnline() {
+  teardownOnline();
+  toMenu();
+}
+
+document.getElementById("btnResume").addEventListener("click", resumeGame);
+document.getElementById("btnRestart").addEventListener("click", restartGame);
+document.getElementById("btnMainMenu").addEventListener("click", toMenu);
+document.getElementById("btnExit").addEventListener("click", exitGame);
+document.getElementById("btnBackFromBye").addEventListener("click", toMenu);
+document.getElementById("btnLeaderboard").addEventListener("click", openLeaderboard);
+document.getElementById("btnLbBack").addEventListener("click", closeLeaderboard);
+
+// Online lobby wiring.
+document.getElementById("btnHost").addEventListener("click", hostRoom);
+document.getElementById("btnShowJoin").addEventListener("click", () => {
+  showOnlinePanel("olJoin"); joinStatusEl.textContent = "";
+  joinInputEl.value = ""; setTimeout(() => joinInputEl.focus(), 30);
+});
+document.getElementById("btnOnlineBack").addEventListener("click", closeOnlineLobby);
+document.getElementById("btnHostCancel").addEventListener("click", () => { teardownOnline(); showOnlinePanel("olChoose"); });
+document.getElementById("btnJoinGo").addEventListener("click", joinRoom);
+document.getElementById("btnJoinCancel").addEventListener("click", () => { teardownOnline(); showOnlinePanel("olChoose"); });
+joinInputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); joinRoom(); } });
+
+// Top option bar wiring. Restart is mode-aware (online relays through the host).
+function barRestart() {
+  if (!running) return;
+  if (cfg.online) {
+    if (online.role === "host") reset(true);
+    else if (online.conn) { try { online.conn.send({ type: "restart" }); } catch {} }
+    return;
+  }
+  restartGame();
+}
+tbPauseBtn.addEventListener("click", () => { if (running && !(cfg && cfg.online)) openPauseMenu(); });
+document.getElementById("tbRestart").addEventListener("click", barRestart);
+document.getElementById("tbMenu").addEventListener("click", () => toMenu());
+
+// Show the bar only while playing; hide the Pause button in online mode
+// (there's no shared pause across devices). Cheap thanks to the signature guard.
+let topBarSig = "";
+function syncTopBar() {
+  const show = running && !pauseMenuOpen;
+  const onlineMode = show && cfg && cfg.online;
+  const sig = show + "|" + onlineMode;
+  if (sig === topBarSig) return;
+  topBarSig = sig;
+  topBarEl.style.display = show ? "flex" : "none";
+  document.body.classList.toggle("playing", !!running);
+  tbPauseBtn.style.display = onlineMode ? "none" : "";
+}
+
+// Keep mouse hover and keyboard selection in sync across all menus.
+[menuEl, leaderboardEl, pauseMenuEl, byeScreenEl].forEach(container => {
+  container.querySelectorAll(".mode-card, .menu-btn, .lb-open-btn").forEach(btn => {
+    btn.addEventListener("mouseenter", () => {
+      const list = activeMenuList();
+      if (!list) return;
+      const i = list.indexOf(btn);
+      if (i !== -1) { menuIndex = i; highlightMenu(); }
+    });
+  });
+});
+
+// Touch / swipe.
+let touch0 = null;
+canvas.addEventListener("touchstart", (e) => {
+  touch0 = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+canvas.addEventListener("touchend", (e) => {
+  if (!touch0 || !running || pauseMenuOpen) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touch0.x, dy = t.clientY - touch0.y;
+  touch0 = null;
+  const nd = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? [1,0] : [-1,0]) : (dy > 0 ? [0,1] : [0,-1]);
+
+  // Online duo: each phone swipes to steer its own snake.
+  if (cfg.online) {
+    if (duoOver) {
+      if (online.role === "host") reset(true);
+      else if (online.conn) { try { online.conn.send({ type: "restart" }); } catch {} }
+      return;
+    }
+    if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;   // a tap does nothing mid-match
+    if (online.role === "host") setDuoDir(0, nd);
+    else if (online.conn) { try { online.conn.send({ type: "dir", dir: nd }); } catch {} }
+    return;
+  }
+  if (cfg.duo) return;  // local duo needs two keyboards, not touch
+
+  if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+    if (gameOver) reset(true); else paused = !paused;
+    return;
+  }
+  if (gameOver) { reset(true); return; }
+  setDir(nd);
+}, { passive: true });
+
+// Menu buttons.
+document.querySelectorAll(".mode-card").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.mode === "online") openOnlineLobby();
+    else startGame(btn.dataset.mode);
+  });
+});
+
+// ---- Update -------------------------------------------------------------
+function step() {
+  if (paused || gameOver) return;
+
+  // Chaos: schedule random control inversion.
+  if (cfg.chaos && performance.now() > nextInvertAt) {
+    invertUntil = performance.now() + 4000;
+    nextInvertAt = performance.now() + 8000 + Math.random() * 6000;
+    glitch = 1; shake = Math.max(shake, 8);
+    banner("⚡ CONTROLS INVERTED ⚡");
+  }
+
+  dir = nextDir;
+  let [hx, hy] = snake[0];
+  let nx = hx + dir[0], ny = hy + dir[1];
+
+  // Walls: wrap or die.
+  if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) {
+    if (cfg.wrap) { nx = (nx + GW) % GW; ny = (ny + GH) % GH; }
+    else { return die(); }
+  }
+
+  // Portals.
+  for (const [a, b] of portals) {
+    if (nx === a[0] && ny === a[1]) { nx = b[0]; ny = b[1]; shake = Math.max(shake,4); break; }
+    if (nx === b[0] && ny === b[1]) { nx = a[0]; ny = a[1]; shake = Math.max(shake,4); break; }
+  }
+
+  // Obstacles.
+  if (occupiedByThings(nx, ny)) return die();
+
+  // Self collision.
+  const hitIdx = snake.findIndex((c, i) => i < snake.length - 1 && c[0] === nx && c[1] === ny);
+  if (hitIdx !== -1) {
+    if (cfg.selfShrink) {
+      // Zen: trim the snake at the point you hit (lose those segments, keep playing).
+      snake = snake.slice(0, Math.max(hitIdx, 2));
+      spawnParticles(nx, ny, COL.head, 10);
+      shake = Math.max(shake, 4);
+    } else {
+      return die();
+    }
+  }
+
+  snake.unshift([nx, ny]);
+
+  if (food && nx === food[0] && ny === food[1]) {
+    score++;
+    speed = Math.max(MIN_SPEED, speed - SPEED_STEP);
+    spawnParticles(nx, ny, COL.food, 16);
+    shake = Math.max(shake, 3);
+    if (cfg.timer) timeLeft += TIME_PER_FOOD;
+    food = randomFood();
+    if (food === null) return win();
+    // Arcade level progression.
+    if (mode === "arcade" && score >= target) {
+      level++;
+      banner("LEVEL " + level + "!");
+      reset(false);           // keep score, new layout, reset snake
+    }
+  } else {
+    snake.pop();
+  }
+}
+
+function die() {
+  gameOver = true;
+  shake = 14; glitch = cfg.chaos ? 1 : 0.4;
+  spawnParticles(snake[0][0], snake[0][1], COL.food, 26);
+  if (!recorded) handleGameOver(false);
+}
+function win() {
+  gameOver = true; shake = 10;
+  if (!recorded) handleGameOver(true);
+}
+function handleGameOver(won) {
+  recorded = true;
+  if (qualifies(mode, score)) {
+    setTimeout(() => {
+      const name = window.prompt(`New High Score! (${MODES[mode].name})\nScore: ${score}\nEnter your name:`, "");
+      if (name && name.trim()) addScore(mode, name.trim(), score);
+      board = topScores(mode);
+    }, 60);
+  }
+  board = topScores(mode);
+}
+
+function banner(text) { flashText = text; flashUntil = performance.now() + 1400; }
+
+// ---- Particles ----------------------------------------------------------
+function spawnParticles(cx, cy, color, n) {
+  const px = cx * CELL + CELL / 2, py = cy * CELL + CELL / 2;
+  for (let i = 0; i < n; i++) {
+    const ang = Math.random() * Math.PI * 2, sp = 0.6 + Math.random() * 2.4;
+    particles.push({ x: px, y: py, vx: Math.cos(ang)*sp, vy: Math.sin(ang)*sp,
+                     life: 1, color, r: 1 + Math.random()*2.5 });
+  }
+  if (particles.length > 400) particles.splice(0, particles.length - 400);
+}
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.x += p.vx * dt * 0.06; p.y += p.vy * dt * 0.06;
+    p.vx *= 0.96; p.vy *= 0.96; p.life -= dt * 0.0016;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ---- Rounded rect helper ------------------------------------------------
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ---- Render -------------------------------------------------------------
+function render(now) {
+  const t = now / 1000;
+
+  beginFrame();
+  ctx.save();
+
+  // Screen shake.
+  if (shake > 0.2) {
+    ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+  }
+
+  // Background gradient.
+  const bg = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  bg.addColorStop(0, "#12122a"); bg.addColorStop(1, "#0a0a14");
+  ctx.fillStyle = bg;
+  ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
+
+  // Subtle grid.
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= WIDTH; x += CELL) { ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, HEIGHT); }
+  for (let y = 0; y <= HEIGHT; y += CELL) { ctx.moveTo(0, y + .5); ctx.lineTo(WIDTH, y + .5); }
+  ctx.stroke();
+
+  // Obstacles.
+  ctx.shadowBlur = 0;
+  for (const o of obstacles) {
+    const [ox, oy] = o.split(",").map(Number);
+    ctx.fillStyle = COL.obstacle;
+    roundRect(ox*CELL+2, oy*CELL+2, CELL-4, CELL-4, 4); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    roundRect(ox*CELL+2, oy*CELL+2, CELL-4, (CELL-4)/2, 4); ctx.fill();
+  }
+
+  // Portals (swirling glow rings).
+  portals.forEach(([a, b], i) => {
+    drawPortal(a, COL.portalA, t + i);
+    drawPortal(b, COL.portalB, t + i + 0.5);
+  });
+
+  // Food (pulsing glowing orb).
+  if (food) {
+    const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+    const fx = food[0]*CELL + CELL/2, fy = food[1]*CELL + CELL/2;
+    ctx.shadowColor = COL.food; ctx.shadowBlur = 12 + pulse * 12;
+    ctx.fillStyle = COL.food;
+    ctx.beginPath(); ctx.arc(fx, fy, CELL/2 - 3 + pulse*1.5, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.arc(fx - 2.5, fy - 2.5, 2, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Snake — glowing gradient body, rounded, head with eyes.
+  const len = snake.length;
+  for (let i = len - 1; i >= 0; i--) {
+    const [sx, sy] = snake[i];
+    const px = sx*CELL, py = sy*CELL;
+    const head = i === 0;
+    const tcol = head ? COL.head : COL.snake;
+    ctx.shadowColor = tcol;
+    ctx.shadowBlur = head ? 18 : 8;
+    // Fade body toward tail slightly.
+    const fade = 0.55 + 0.45 * (1 - i / Math.max(len, 1));
+    ctx.globalAlpha = head ? 1 : fade;
+    ctx.fillStyle = tcol;
+    roundRect(px+1.5, py+1.5, CELL-3, CELL-3, head ? 7 : 5); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (head) drawEyes(px, py);
+  }
+  ctx.shadowBlur = 0;
+
+  // Particles.
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+
+  // Chaos glitch: RGB split scanline flashes.
+  if (glitch > 0.02) {
+    ctx.save();
+    ctx.globalAlpha = glitch * 0.25;
+    ctx.fillStyle = "#f38ba8";
+    for (let i = 0; i < 3; i++) {
+      const gy = Math.random() * HEIGHT;
+      ctx.fillRect(0, gy, WIDTH, 2 + Math.random() * 4);
+    }
+    ctx.restore();
+  }
+
+  // ---- HUD ----
+  drawHUD(t);
+
+  // Overlays.
+  if (paused) centerBanner("PAUSED", "Press Space to resume");
+  if (gameOver) overlayGameOver();
+  if (flashText && now < flashUntil) {
+    const a = Math.min(1, (flashUntil - now) / 400);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = cfg.accent;
+    ctx.font = "800 30px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.shadowColor = cfg.accent; ctx.shadowBlur = 20;
+    ctx.fillText(flashText, WIDTH/2, HEIGHT/2 - 40);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+}
+
+function drawPortal(cell, color, t) {
+  const cx = cell[0]*CELL + CELL/2, cy = cell[1]*CELL + CELL/2;
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(t * 2);
+  ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+  ctx.shadowColor = color; ctx.shadowBlur = 14;
+  for (let r = 3; r <= 8; r += 2.5) {
+    ctx.globalAlpha = 0.8 - r*0.05;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 1.5); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+}
+
+function drawEyes(px, py) {
+  const [dx, dy] = dir;
+  ctx.shadowBlur = 0;
+  const cx = px + CELL/2, cy = py + CELL/2;
+  const fx = dx * 3, fy = dy * 3;          // shift eyes toward travel direction
+  const perp = [dy, -dx];                  // perpendicular = the two eye positions
+  for (const s of [-1, 1]) {
+    const ex = cx + fx + perp[0]*4*s, ey = cy + fy + perp[1]*4*s;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(ex, ey, 2.6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#0d0d1a";            // pupil, looking forward
+    ctx.beginPath(); ctx.arc(ex + dx*1, ey + dy*1, 1.3, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawHUD(t) {
+  ctx.textAlign = "left";
+  ctx.shadowBlur = 0;
+  ctx.font = "700 14px Consolas, monospace";
+  ctx.fillStyle = COL.text;
+  ctx.fillText("Score " + score, 12, 22);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = cfg.accent;
+  ctx.font = "700 12px Consolas, monospace";
+  ctx.fillText(MODES[mode].name.toUpperCase(), WIDTH - 12, 20);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = COL.dim;
+  ctx.font = "12px Consolas, monospace";
+  if (mode === "arcade") {
+    ctx.fillText(`Lv ${level}  →  ${score}/${target}`, 12, 40);
+  }
+  if (cfg.timer) {
+    const low = timeLeft <= 6;
+    ctx.textAlign = "right";
+    ctx.fillStyle = low ? "#f38ba8" : "#f9e2af";
+    ctx.font = "800 20px Consolas, monospace";
+    const secs = Math.max(0, Math.ceil(timeLeft));
+    if (!low || Math.floor(t*4) % 2 === 0) ctx.fillText("⏱ " + secs + "s", WIDTH - 12, 44);
+  }
+  if (performance.now() < invertUntil) {
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#cba6f7";
+    ctx.font = "700 12px Consolas, monospace";
+    ctx.fillText("⚡ INVERTED", WIDTH/2, 20);
+  }
+}
+
+function centerBanner(title, sub) {
+  ctx.fillStyle = "rgba(10,10,20,0.55)";
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.textAlign = "center";
+  ctx.fillStyle = COL.text;
+  ctx.font = "800 30px 'Segoe UI', sans-serif";
+  ctx.shadowColor = cfg.accent; ctx.shadowBlur = 16;
+  ctx.fillText(title, WIDTH/2, HEIGHT/2 - 6);
+  ctx.shadowBlur = 0;
+  ctx.font = "13px Consolas, monospace";
+  ctx.fillStyle = COL.dim;
+  ctx.fillText(sub, WIDTH/2, HEIGHT/2 + 24);
+}
+
+function overlayGameOver() {
+  const won = food === null;
+  const pad = 34;
+  ctx.fillStyle = "rgba(8,8,16,0.86)";
+  roundRect(pad, 16, WIDTH-2*pad, HEIGHT-32, 14); ctx.fill();
+  ctx.strokeStyle = cfg.accent; ctx.lineWidth = 2;
+  ctx.shadowColor = cfg.accent; ctx.shadowBlur = 18;
+  roundRect(pad, 16, WIDTH-2*pad, HEIGHT-32, 14); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = COL.text;
+  ctx.font = "800 26px 'Segoe UI', sans-serif";
+  ctx.fillText(won ? "🏆 YOU WIN!" : "GAME OVER", WIDTH/2, 52);
+
+  ctx.fillStyle = COL.food;
+  ctx.font = "14px Consolas, monospace";
+  ctx.fillText(`${MODES[mode].name}  ·  Your score: ${score}`, WIDTH/2, 76);
+
+  ctx.fillStyle = cfg.accent;
+  ctx.font = "700 13px Consolas, monospace";
+  ctx.fillText("TOP SCORES", WIDTH/2, 102);
+
+  ctx.font = "13px Consolas, monospace";
+  ctx.fillStyle = COL.text;
+  if (!board || board.length === 0) {
+    ctx.fillText("No scores yet — be the first!", WIDTH/2, 130);
+  } else {
+    board.forEach((e, i) => {
+      const rank = String(i+1).padStart(2, " ") + ".";
+      const nm = (e.name || "???").slice(0,12).padEnd(12, " ");
+      const sc = String(e.score).padStart(4, " ");
+      ctx.fillText(`${rank}  ${nm} ${sc}`, WIDTH/2, 126 + i*18);
+    });
+  }
+
+  ctx.fillStyle = COL.dim;
+  ctx.font = "12px Consolas, monospace";
+  ctx.fillText("R restart   ·   Esc menu", WIDTH/2, HEIGHT - 30);
+}
+
+// ---- Duo (local 2-player) rendering -------------------------------------
+function renderDuo(now) {
+  const t = now / 1000;
+  beginFrame();
+  ctx.save();
+  if (shake > 0.2) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+
+  // Background + grid.
+  const bg = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  bg.addColorStop(0, "#12122a"); bg.addColorStop(1, "#0a0a14");
+  ctx.fillStyle = bg; ctx.fillRect(-20, -20, WIDTH+40, HEIGHT+40);
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = 0; x <= WIDTH; x += CELL) { ctx.moveTo(x+.5, 0); ctx.lineTo(x+.5, HEIGHT); }
+  for (let y = 0; y <= HEIGHT; y += CELL) { ctx.moveTo(0, y+.5); ctx.lineTo(WIDTH, y+.5); }
+  ctx.stroke();
+
+  // Food orbs.
+  const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+  for (const f of foods) {
+    const fx = f[0]*CELL + CELL/2, fy = f[1]*CELL + CELL/2;
+    ctx.shadowColor = COL.food; ctx.shadowBlur = 12 + pulse*12;
+    ctx.fillStyle = COL.food;
+    ctx.beginPath(); ctx.arc(fx, fy, CELL/2 - 3 + pulse*1.5, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // Both snakes.
+  players.forEach(p => {
+    const len = p.snake.length;
+    for (let i = len - 1; i >= 0; i--) {
+      const [sx, sy] = p.snake[i];
+      const isHead = i === 0;
+      const col = isHead ? p.head : p.body;
+      ctx.globalAlpha = p.alive ? (isHead ? 1 : 0.55 + 0.45*(1 - i/Math.max(len,1))) : 0.28;
+      ctx.shadowColor = col; ctx.shadowBlur = isHead ? 16 : 7;
+      ctx.fillStyle = col;
+      roundRect(sx*CELL+1.5, sy*CELL+1.5, CELL-3, CELL-3, isHead ? 7 : 5); ctx.fill();
+      ctx.globalAlpha = 1;
+      if (isHead && p.alive) drawEyesFor(sx*CELL, sy*CELL, p.dir);
+    }
+  });
+  ctx.shadowBlur = 0;
+
+  // Particles.
+  for (const pt of particles) {
+    ctx.globalAlpha = Math.max(0, pt.life);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // HUD: both scores.
+  ctx.shadowBlur = 0;
+  ctx.textAlign = "left";
+  ctx.font = "800 15px Consolas, monospace";
+  ctx.fillStyle = players[0].head;
+  ctx.fillText("P1  " + players[0].score, 12, 22);
+  ctx.textAlign = "right";
+  ctx.fillStyle = players[1].head;
+  ctx.fillText(players[1].score + "  P2", WIDTH - 12, 22);
+  ctx.textAlign = "center";
+  ctx.fillStyle = COL.dim;
+  ctx.font = "11px Consolas, monospace";
+  ctx.fillText(
+    cfg.online
+      ? (online.role === "host" ? "You are P1 🟢  (swipe / arrows)" : "You are P2 🔵  (swipe / arrows)")
+      : "P1: Arrows   ·   P2: WASD",
+    WIDTH/2, 20);
+
+  if (countdown > 0 && !paused) {
+    const n = Math.ceil(countdown / 1000);          // 3, 2, 1
+    const frac = (countdown % 1000) / 1000;         // 1 → 0 within each second
+    ctx.fillStyle = "rgba(8,8,16,0.55)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.textAlign = "center";
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, frac * 1.4);      // pop in each number
+    ctx.fillStyle = cfg.accent;
+    ctx.shadowColor = cfg.accent; ctx.shadowBlur = 30;
+    ctx.font = "800 90px 'Segoe UI', sans-serif";
+    ctx.fillText(String(n), WIDTH/2, HEIGHT/2 + 18);
+    ctx.restore();
+    ctx.fillStyle = COL.dim;
+    ctx.font = "14px Consolas, monospace";
+    ctx.fillText(cfg.online ? "Get ready!   Swipe or arrow keys to move"
+                            : "Get ready!   P1: Arrows   ·   P2: WASD", WIDTH/2, HEIGHT - 40);
+  }
+
+  if (paused) centerBanner("PAUSED", "Press Space to resume");
+  if (duoOver) {
+    const pad = 60;
+    ctx.fillStyle = "rgba(8,8,16,0.86)";
+    roundRect(pad, HEIGHT/2 - 70, WIDTH-2*pad, 140, 14); ctx.fill();
+    ctx.strokeStyle = cfg.accent; ctx.lineWidth = 2;
+    ctx.shadowColor = cfg.accent; ctx.shadowBlur = 18;
+    roundRect(pad, HEIGHT/2 - 70, WIDTH-2*pad, 140, 14); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.textAlign = "center";
+    ctx.fillStyle = COL.text;
+    ctx.font = "800 30px 'Segoe UI', sans-serif";
+    ctx.fillText(duoResult, WIDTH/2, HEIGHT/2 - 14);
+    ctx.font = "14px Consolas, monospace";
+    ctx.fillStyle = COL.dim;
+    ctx.fillText(`P1: ${players[0].score}   ·   P2: ${players[1].score}`, WIDTH/2, HEIGHT/2 + 16);
+    ctx.fillText("Enter / R  restart   ·   Esc  menu", WIDTH/2, HEIGHT/2 + 44);
+  }
+}
+// Eye drawing that takes an explicit direction (used by duo snakes).
+function drawEyesFor(px, py, d) {
+  const [dx, dy] = d;
+  ctx.shadowBlur = 0;
+  const cx = px + CELL/2, cy = py + CELL/2;
+  const fx = dx * 3, fy = dy * 3, perp = [dy, -dx];
+  for (const s of [-1, 1]) {
+    const ex = cx + fx + perp[0]*4*s, ey = cy + fy + perp[1]*4*s;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(ex, ey, 2.6, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#0d0d1a";
+    ctx.beginPath(); ctx.arc(ex + dx, ey + dy, 1.3, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// ---- Idle attract animation (when menu is open) -------------------------
+function renderIdle(now) {
+  const t = now / 1000;
+  beginFrame();
+  const bg = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  bg.addColorStop(0, "#12122a"); bg.addColorStop(1, "#0a0a14");
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.strokeStyle = COL.grid;
+  ctx.beginPath();
+  for (let x = 0; x <= WIDTH; x += CELL) { ctx.moveTo(x+.5,0); ctx.lineTo(x+.5,HEIGHT); }
+  for (let y = 0; y <= HEIGHT; y += CELL) { ctx.moveTo(0,y+.5); ctx.lineTo(WIDTH,y+.5); }
+  ctx.stroke();
+  // A little wandering snake for flavor.
+  for (let i = 0; i < 8; i++) {
+    const x = ((Math.sin(t*0.8 + i*0.5) * 0.5 + 0.5) * (GW-1)) | 0;
+    const y = (( (t*3 + i) % GH )) | 0;
+    ctx.fillStyle = i === 0 ? COL.head : COL.snake;
+    ctx.shadowColor = COL.snake; ctx.shadowBlur = 8;
+    roundRect(x*CELL+2, y*CELL+2, CELL-4, CELL-4, 5); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+}
+
+// ---- Main loop (rAF, fixed-step movement) -------------------------------
+function frame(now) {
+  const dt = Math.min(50, now - lastT);
+  lastT = now;
+
+  syncTopBar();
+
+  if (running) {
+    if (cfg.online && online.role === "guest") {
+      // Guest doesn't simulate — it just renders the latest state from the host.
+      updateParticles(dt);
+      shake *= 0.86; glitch *= 0.9;
+      renderDuo(now);
+    } else {
+      const over = cfg.duo ? duoOver : gameOver;
+      if (!paused && !over) {
+        if (cfg.duo && countdown > 0) {
+          countdown -= dt;      // hold the snakes still during the countdown
+          moveAcc = 0;
+        } else {
+          moveAcc += dt;
+          while (moveAcc >= speed) { cfg.duo ? stepDuo() : step(); moveAcc -= speed; }
+          if (cfg.timer) {
+            timeLeft -= dt / 1000;
+            if (timeLeft <= 0) { timeLeft = 0; die(); }
+          }
+        }
+      }
+      updateParticles(dt);
+      shake *= 0.86; glitch *= 0.9;
+      cfg.duo ? renderDuo(now) : render(now);
+      if (cfg.online && online.role === "host") sendState();   // stream to the guest
+    }
+  } else {
+    renderIdle(now);
+  }
+  requestAnimationFrame(frame);
+}
+
+// Start: main menu is visible, so highlight its first option for keyboard play.
+focusMenu();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
