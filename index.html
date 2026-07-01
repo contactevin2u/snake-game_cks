@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Snake Game</title>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --grid: #2a2a3c;
+    --snake: #a6e3a1;
+    --snake-head: #94e2d5;
+    --food: #f38ba8;
+    --text: #cdd6f4;
+    --panel: #181825;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #11111b;
+    color: var(--text);
+    font-family: Consolas, "Courier New", monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 16px;
+  }
+  h1 { margin: 0; font-size: 22px; letter-spacing: 1px; }
+  canvas {
+    background: var(--bg);
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    touch-action: none;
+    max-width: 100%;
+    height: auto;
+  }
+  .hint { font-size: 13px; opacity: 0.7; text-align: center; line-height: 1.6; }
+  kbd {
+    background: var(--panel);
+    border: 1px solid var(--grid);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+  <h1>Snake Game</h1>
+  <canvas id="board" width="600" height="400"></canvas>
+  <div class="hint">
+    <kbd>Arrows</kbd> / <kbd>WASD</kbd> move &nbsp;•&nbsp;
+    <kbd>Space</kbd>/<kbd>P</kbd> pause &nbsp;•&nbsp;
+    <kbd>R</kbd> restart &nbsp;•&nbsp; swipe on touch
+  </div>
+
+<script>
+// ---- Game configuration (mirrors snake.py) ------------------------------
+const CELL_SIZE = 20;
+const GRID_WIDTH = 30;
+const GRID_HEIGHT = 20;
+const START_SPEED_MS = 120;
+const MIN_SPEED_MS = 60;
+const SPEED_STEP_MS = 4;
+
+const BG_COLOR = "#1e1e2e";
+const GRID_COLOR = "#2a2a3c";
+const SNAKE_COLOR = "#a6e3a1";
+const SNAKE_HEAD_COLOR = "#94e2d5";
+const FOOD_COLOR = "#f38ba8";
+const TEXT_COLOR = "#cdd6f4";
+
+const WIDTH = GRID_WIDTH * CELL_SIZE;
+const HEIGHT = GRID_HEIGHT * CELL_SIZE;
+const MAX_SCORES = 10;
+const STORAGE_KEY = "snake_scores_v1";
+
+const canvas = document.getElementById("board");
+canvas.width = WIDTH;
+canvas.height = HEIGHT;
+const ctx = canvas.getContext("2d");
+
+// ---- Leaderboard (localStorage, replaces scores.db) ---------------------
+function loadScores() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveScoresList(list) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  } catch (e) { /* storage full or blocked; ignore */ }
+}
+
+function getTopScores(limit = MAX_SCORES) {
+  const list = loadScores();
+  // Highest first; ties broken by oldest first (created ascending).
+  list.sort((a, b) => b.score - a.score || a.created - b.created);
+  return list.slice(0, limit);
+}
+
+function addScore(name, score) {
+  const list = loadScores();
+  list.push({ name: name.slice(0, 20), score, created: Date.now() });
+  list.sort((a, b) => b.score - a.score || a.created - b.created);
+  saveScoresList(list.slice(0, MAX_SCORES));
+}
+
+function qualifiesForLeaderboard(score) {
+  if (score <= 0) return false;
+  const top = getTopScores(MAX_SCORES);
+  if (top.length < MAX_SCORES) return true;
+  return score > top[top.length - 1].score;
+}
+
+// ---- Game state ----------------------------------------------------------
+let snake, direction, nextDirection, food, score, speed,
+    paused, gameOver, scoreRecorded, topScores, loopTimer;
+
+function reset() {
+  const midX = Math.floor(GRID_WIDTH / 2);
+  const midY = Math.floor(GRID_HEIGHT / 2);
+  snake = [];
+  for (let i = 0; i < 3; i++) snake.push([midX - i, midY]);
+  direction = [1, 0];
+  nextDirection = [1, 0];
+  food = randomFood();
+  score = 0;
+  speed = START_SPEED_MS;
+  paused = false;
+  gameOver = false;
+  scoreRecorded = false;
+  topScores = getTopScores();
+}
+
+function randomFood() {
+  const occupied = new Set(snake.map(c => c[0] + "," + c[1]));
+  const empty = [];
+  for (let x = 0; x < GRID_WIDTH; x++) {
+    for (let y = 0; y < GRID_HEIGHT; y++) {
+      if (!occupied.has(x + "," + y)) empty.push([x, y]);
+    }
+  }
+  if (empty.length === 0) return null;
+  return empty[Math.floor(Math.random() * empty.length)];
+}
+
+// ---- Input ---------------------------------------------------------------
+const DIRECTIONS = {
+  arrowup: [0, -1], w: [0, -1],
+  arrowdown: [0, 1], s: [0, 1],
+  arrowleft: [-1, 0], a: [-1, 0],
+  arrowright: [1, 0], d: [1, 0],
+};
+
+document.addEventListener("keydown", (e) => {
+  const key = e.key.toLowerCase();
+
+  if (key === "escape") return; // no window to close in the browser
+
+  if (key === "r" && gameOver) { reset(); return; }
+
+  if ((key === " " || key === "p") && !gameOver) {
+    paused = !paused;
+    e.preventDefault();
+    return;
+  }
+
+  if (key in DIRECTIONS) {
+    e.preventDefault();
+    const [dx, dy] = DIRECTIONS[key];
+    const [cdx, cdy] = direction;
+    // Prevent reversing directly into yourself.
+    if (dx !== -cdx || dy !== -cdy) nextDirection = [dx, dy];
+  }
+});
+
+// Touch / swipe controls.
+let touchStart = null;
+canvas.addEventListener("touchstart", (e) => {
+  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+canvas.addEventListener("touchend", (e) => {
+  if (!touchStart) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStart.x;
+  const dy = t.clientY - touchStart.y;
+  touchStart = null;
+  if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+    if (!gameOver) paused = !paused; // tap = pause
+    return;
+  }
+  let nd;
+  if (Math.abs(dx) > Math.abs(dy)) nd = dx > 0 ? [1, 0] : [-1, 0];
+  else nd = dy > 0 ? [0, 1] : [0, -1];
+  const [cdx, cdy] = direction;
+  if (nd[0] !== -cdx || nd[1] !== -cdy) nextDirection = nd;
+  if (gameOver) reset();
+}, { passive: true });
+
+// ---- Main loop -----------------------------------------------------------
+function tick() {
+  if (!paused && !gameOver) {
+    move();
+    if (gameOver && !scoreRecorded) handleGameOver();
+  }
+  render();
+  loopTimer = setTimeout(tick, speed);
+}
+
+function handleGameOver() {
+  scoreRecorded = true;
+  render();
+  if (qualifiesForLeaderboard(score)) {
+    let name = window.prompt(`New High Score!\nScore: ${score}\nEnter your name:`, "");
+    if (name && name.trim()) addScore(name.trim().slice(0, 20), score);
+  }
+  topScores = getTopScores();
+}
+
+function move() {
+  direction = nextDirection;
+  const [dx, dy] = direction;
+  const [hx, hy] = snake[0];
+  const newHead = [hx + dx, hy + dy];
+
+  // Collision with walls.
+  if (newHead[0] < 0 || newHead[0] >= GRID_WIDTH ||
+      newHead[1] < 0 || newHead[1] >= GRID_HEIGHT) {
+    gameOver = true;
+    return;
+  }
+
+  // Collision with self (ignore the tail cell, it will move away).
+  for (let i = 0; i < snake.length - 1; i++) {
+    if (snake[i][0] === newHead[0] && snake[i][1] === newHead[1]) {
+      gameOver = true;
+      return;
+    }
+  }
+
+  snake.unshift(newHead);
+
+  if (food && newHead[0] === food[0] && newHead[1] === food[1]) {
+    score += 1;
+    speed = Math.max(MIN_SPEED_MS, speed - SPEED_STEP_MS);
+    food = randomFood();
+    if (food === null) gameOver = true; // board full = you win!
+  } else {
+    snake.pop();
+  }
+}
+
+// ---- Drawing -------------------------------------------------------------
+function drawGrid() {
+  ctx.strokeStyle = GRID_COLOR;
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= WIDTH; x += CELL_SIZE) {
+    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, HEIGHT); ctx.stroke();
+  }
+  for (let y = 0; y <= HEIGHT; y += CELL_SIZE) {
+    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(WIDTH, y + 0.5); ctx.stroke();
+  }
+}
+
+function cellRect(cell, color) {
+  const [x, y] = cell;
+  ctx.fillStyle = color;
+  ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+}
+
+function centerText(title, subtitle) {
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.textAlign = "center";
+  ctx.font = "bold 26px Consolas, monospace";
+  ctx.fillText(title, WIDTH / 2, HEIGHT / 2 - 4);
+  ctx.font = "12px Consolas, monospace";
+  ctx.fillText(subtitle, WIDTH / 2, HEIGHT / 2 + 28);
+}
+
+function gameOverOverlay(title) {
+  const pad = 40;
+  ctx.fillStyle = BG_COLOR;
+  // Panel background.
+  ctx.fillStyle = "#181825";
+  ctx.fillRect(pad, 20, WIDTH - 2 * pad, HEIGHT - 40);
+  ctx.strokeStyle = SNAKE_HEAD_COLOR;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(pad, 20, WIDTH - 2 * pad, HEIGHT - 40);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.font = "bold 22px Consolas, monospace";
+  ctx.fillText(title, WIDTH / 2, 54);
+
+  ctx.fillStyle = FOOD_COLOR;
+  ctx.font = "13px Consolas, monospace";
+  ctx.fillText(`Your score: ${score}`, WIDTH / 2, 80);
+
+  ctx.fillStyle = SNAKE_HEAD_COLOR;
+  ctx.font = "bold 13px Consolas, monospace";
+  ctx.fillText("TOP SCORES", WIDTH / 2, 108);
+
+  const startY = 132;
+  const rowH = 20;
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.font = "12px Consolas, monospace";
+  if (!topScores || topScores.length === 0) {
+    ctx.fillText("No scores yet - be the first!", WIDTH / 2, startY + 10);
+  } else {
+    topScores.forEach((entry, i) => {
+      const rank = String(i + 1).padStart(2, " ") + ".";
+      const name = entry.name.slice(0, 14).padEnd(14, " ");
+      const sc = String(entry.score).padStart(5, " ");
+      ctx.fillText(`${rank}  ${name} ${sc}`, WIDTH / 2, startY + i * rowH);
+    });
+  }
+
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.font = "11px Consolas, monospace";
+  ctx.fillText("Press R to restart", WIDTH / 2, HEIGHT - 36);
+}
+
+function render() {
+  // Clear + board.
+  ctx.fillStyle = BG_COLOR;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  drawGrid();
+
+  // Food.
+  if (food) cellRect(food, FOOD_COLOR);
+
+  // Snake body + head.
+  snake.forEach((cell, i) => cellRect(cell, i === 0 ? SNAKE_HEAD_COLOR : SNAKE_COLOR));
+
+  // Score.
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.textAlign = "left";
+  ctx.font = "bold 12px Consolas, monospace";
+  ctx.fillText(`Score: ${score}`, 8, 18);
+
+  // Overlays.
+  if (paused) centerText("PAUSED", "Press Space to resume");
+  if (gameOver) gameOverOverlay(food === null ? "YOU WIN!" : "GAME OVER");
+}
+
+// ---- Start ---------------------------------------------------------------
+reset();
+tick();
+</script>
+</body>
+</html>
